@@ -75,9 +75,12 @@ RUN git clone https://github.com/openstack/tempest.git ${repos_dir}/tempest
 RUN git clone https://git.opendaylight.org/gerrit/p/integration/test.git ${repos_dir}/odl_test
 RUN git clone -b stable https://github.com/boucherv-orange/clearwater-live-test ${repos_dir}/vims-test
 RUN git clone https://github.com/openstack/networking-bgpvpn ${repos_dir}/bgpvpn
-RUN git clone https://gerrit.onosproject.org/OnosSystemTest  ${repos_dir}/onos
+RUN git clone https://github.com/wuwenbin2/OnosSystemTest.git ${repos_dir}/onos
 RUN git clone https://github.com/opnfv/promise ${repos_dir}/promise
 RUN git clone https://gerrit.opnfv.org/gerrit/ovno ${repos_dir}/ovno
+RUN git clone https://gerrit.opnfv.org/gerrit/copper ${repos_dir}/copper
+RUN git clone https://gerrit.opnfv.org/gerrit/moon ${repos_dir}/moon
+RUN git clone https://gerrit.opnfv.org/gerrit/sdnvpn ${repos_dir}/sdnvpn
 
 RUN pip install -r ${repos_dir}/functest/docker/requirements.pip
 RUN pip install -r ${repos_dir}/rally/requirements.txt
@@ -86,9 +89,13 @@ RUN pip install -r ${repos_dir}/tempest/requirements.txt
 RUN ${repos_dir}/rally/install_rally.sh --yes
 
 ADD http://download.cirros-cloud.net/0.3.4/cirros-0.3.4-x86_64-disk.img /home/opnfv/functest/data/
+ADD http://205.177.226.237:9999/onosfw/firewall_block_image.img /home/opnfv/functest/data/
 
 RUN gpg --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3
 RUN curl -L https://get.rvm.io | bash -s stable
+
+RUN /bin/bash -c ". /home/opnfv/repos/functest/testcases/features/sfc/tacker_client_install.sh"
+RUN cd ${repos_dir}/bgpvpn && pip install .
 
 RUN /bin/bash -c ". /etc/profile.d/rvm.sh \
     && cd /home/opnfv/repos/vims-test \

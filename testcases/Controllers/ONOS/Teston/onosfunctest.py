@@ -14,43 +14,47 @@ lanqinglong@huawei.com
 #
 """
 
-import argparse
 import datetime
 import os
 import re
 import time
-import yaml
+
+from neutronclient.v2_0 import client as neutronclient
 
 import functest.utils.functest_logger as ft_logger
 import functest.utils.functest_utils as functest_utils
+import functest.utils.openstack_utils as openstack_utils
 
-parser = argparse.ArgumentParser()
-parser.add_argument("-i", "--installer", help="Installer type")
-parser.add_argument("-s", "--scenario", help="Sfc support")
-args = parser.parse_args()
 """ logging configuration """
 logger = ft_logger.Logger("onos").getLogger()
 
-
-with open(os.environ["CONFIG_FUNCTEST_YAML"]) as f:
-    functest_yaml = yaml.safe_load(f)
-f.close()
-
 # onos parameters
-TEST_DB = functest_yaml.get("results").get("test_db_url")
-ONOS_REPO_PATH = functest_yaml.get("general").get("directories").get(
-    "dir_repos")
-ONOS_CONF_DIR = functest_yaml.get("general").get("directories").get(
-    "dir_functest_conf")
+TEST_DB = functest_utils.get_parameter_from_yaml(
+    "results.test_db_url")
+ONOS_REPO_PATH = functest_utils.get_parameter_from_yaml(
+    "general.directories.dir_repos")
+ONOS_CONF_DIR = functest_utils.get_parameter_from_yaml(
+    "general.directories.dir_functest_conf")
 REPO_PATH = ONOS_REPO_PATH + '/functest/'
 if not os.path.exists(REPO_PATH):
     logger.error("Functest repository directory not found '%s'" % REPO_PATH)
     exit(-1)
 
-ONOSCI_PATH = ONOS_REPO_PATH + "/" 
+ONOSCI_PATH = ONOS_REPO_PATH + "/"
 starttime = datetime.datetime.now()
 
 HOME = os.environ['HOME'] + "/"
+INSTALLER_TYPE = os.environ['INSTALLER_TYPE']
+DEPLOY_SCENARIO = os.environ['DEPLOY_SCENARIO']
+ONOSCI_PATH = ONOS_REPO_PATH + "/"
+GLANCE_IMAGE_NAME = functest_utils.get_parameter_from_yaml(
+    "onos_sfc.image_name")
+GLANCE_IMAGE_FILENAME = functest_utils.get_parameter_from_yaml(
+    "onos_sfc.image_file_name")
+GLANCE_IMAGE_PATH = functest_utils.get_parameter_from_yaml(
+    "general.directories.dir_functest_data") + "/" + GLANCE_IMAGE_FILENAME
+SFC_PATH = REPO_PATH + functest_utils.get_parameter_from_yaml(
+    "general.directories.dir_onos_sfc")
 
 
 def RunScript(testname):
@@ -64,7 +68,7 @@ def RunScript(testname):
     os.system(runtest)
 
 
-def DownloadCodes(url="https://github.com/sunyulin/OnosSystemTest.git"):
+def DownloadCodes(url="https://github.com/wuwenbin2/OnosSystemTest.git"):
     """
     Download Onos Teston codes
     Parameters:
@@ -146,12 +150,6 @@ def SetOnosIp():
     os.environ['OC1'] = OC1
     time.sleep(2)
     logger.debug("ONOS IP is " + OC1)
-    TESTONPATH = ONOSCI_PATH + "onos_sfc/"
-    cmd_onos_ip = "sed -i 's/onos_ip/" + OC1 + "/g' " + TESTONPATH + "Sfc_fun.py"
-    cmd_openstack_ip = "sed -i 's/openstack_ip/" + OC1 + "/g' " + TESTONPATH + "Sfc_fun.py"
-    logger.info("Modify ip for SFC")
-    os.system(cmd_onos_ip)
-    os.system(cmd_openstack_ip)
 
 
 def SetOnosIpForJoid():
@@ -161,16 +159,6 @@ def SetOnosIpForJoid():
     os.environ['OC1'] = OC1
     time.sleep(2)
     logger.debug("ONOS IP is " + OC1)
-    cmd = "openstack catalog show network | grep publicURL"
-    cmd_output = os.popen(cmd).read()
-    OP = re.search(r"\d+\.\d+\.\d+\.\d+", cmd_output).group()
-    TESTONPATH = ONOSCI_PATH + "onos_sfc/"
-    cmd_openstack_ip = "sed -i 's/openstack_ip/" + OP + "/g' " + TESTONPATH + "Sfc_fun.py"
-    logger.info(cmd_openstack_ip)
-    os.system(cmd_openstack_ip)
-    cmd_onos_ip = "sed -i 's/onos_ip/" + OC1 + "/g' " + TESTONPATH + "Sfc_fun.py"
-    logger.info(cmd_onos_ip)
-    os.system(cmd_onos_ip)
 
 
 def CleanOnosTest():
@@ -180,34 +168,68 @@ def CleanOnosTest():
     time.sleep(2)
     logger.debug("Clean ONOS Teston")
 
+
+def CreateImage():
+    glance_client = openstack_utils.get_glance_client()
+    image_id = openstack_utils.create_glance_image(glance_client,
+                                                   GLANCE_IMAGE_NAME,
+                                                   GLANCE_IMAGE_PATH)
+    EXIT_CODE = -1
+    if not image_id:
+        logger.error("Failed to create a Glance image...")
+        return(EXIT_CODE)
+    logger.debug("Image '%s' with ID=%s created successfully."
+                 % (GLANCE_IMAGE_NAME, image_id))
+
+
 def SfcTest():
-    #cmd = "openstack catalog show network | grep publicURL"
-    #cmd_output = os.popen(cmd).read()
-    #openstackip = re.search(r"\d+\.\d+\.\d+\.\d+", cmd_output).group()
-    #TESTONPATH = ONOSCI_PATH + "onos_sfc/"
-    #cmd_openstack_ip = "sed -i 's/openstack_ip/" +  openstackip + "/g' " + TESTONPATH + "Sfc_fun.py"
-    #logger.info(cmd_openstack_ip)
-    #logger.debug("modify openstack ip")
-    #os.system(cmd_openstack_ip)
-    TESTONPATH = ONOSCI_PATH + "onos_sfc/"
-    cmd = "python " + TESTONPATH + "Sfc.py"
+    cmd = "python " + SFC_PATH + "Sfc.py"
     logger.debug("Run sfc tests")
     os.system(cmd)
-     
+
+
+def GetIp(type):
+    cmd = "openstack catalog show " + type + " | grep publicURL"
+    cmd_output = os.popen(cmd).read()
+    ip = re.search(r"\d+\.\d+\.\d+\.\d+", cmd_output).group()
+    return ip
+
+
+def Replace(before, after):
+    file = "Sfc_fun.py"
+    cmd = "sed -i 's/" + before + "/" + after + "/g' " + SFC_PATH + file
+    os.system(cmd)
+
+
+def SetSfcConf():
+    Replace("keystone_ip", GetIp("keystone"))
+    Replace("neutron_ip", GetIp("neutron"))
+    Replace("nova_ip", GetIp("nova"))
+    Replace("glance_ip", GetIp("glance"))
+    pwd = os.environ['OS_PASSWORD']
+    Replace("console", pwd)
+    creds_neutron = openstack_utils.get_credentials("neutron")
+    neutron_client = neutronclient.Client(**creds_neutron)
+    ext_net = openstack_utils.get_external_net(neutron_client)
+    Replace("admin_floating_net", ext_net)
+    logger.info("Modify configuration for SFC")
+
 
 def main():
     start_time = time.time()
     stop_time = start_time
-    
-    #DownloadCodes()
-    if args.installer == "joid":
+    # DownloadCodes()
+    # if args.installer == "joid":
+    if INSTALLER_TYPE == "joid":
         logger.debug("Installer is Joid")
         SetOnosIpForJoid()
     else:
         SetOnosIp()
     RunScript("FUNCvirNetNB")
     RunScript("FUNCvirNetNBL3")
-    if args.scenario == "sfc":
+    if DEPLOY_SCENARIO == "os-onos-sfc-ha":
+        CreateImage()
+        SetSfcConf()
         SfcTest()
     try:
         logger.debug("Push ONOS results into DB")
@@ -217,11 +239,11 @@ def main():
 
         # ONOS success criteria = all tests OK
         # i.e. FUNCvirNet & FUNCvirNetL3
-        status = "failed"
+        status = "FAIL"
         try:
             if (result['FUNCvirNet']['result'] == "Success" and
                     result['FUNCvirNetL3']['result'] == "Success"):
-                    status = "passed"
+                    status = "PASS"
         except:
             logger.error("Unable to set ONOS criteria")
 
@@ -236,7 +258,7 @@ def main():
     except:
         logger.error("Error pushing results into Database")
 
-    #CleanOnosTest()
+    # CleanOnosTest()
 
 
 if __name__ == '__main__':

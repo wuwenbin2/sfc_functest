@@ -355,10 +355,10 @@ def run_task(test_name):
         json_data = json.load(json_file)
 
     """ parse JSON operation result """
-    status = "failed"
+    status = "FAIL"
     if task_succeed(json_results):
         logger.info('Test scenario: "{}" OK.'.format(test_name) + "\n")
-        status = "passed"
+        status = "PASS"
     else:
         logger.info('Test scenario: "{}" Failed.'.format(test_name) + "\n")
 
@@ -530,10 +530,10 @@ def main():
     # logger.info("Results: "+str(json_results))
 
     # Evaluation of the success criteria
-    status = "failed"
+    status = "FAIL"
     # for Rally we decided that the overall success rate must be above 90%
     if total_success >= 90:
-        status = "passed"
+        status = "PASS"
 
     if args.sanity:
         case_name = "rally_sanity"

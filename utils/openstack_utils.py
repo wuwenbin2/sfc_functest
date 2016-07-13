@@ -12,12 +12,12 @@ import os
 import os.path
 import subprocess
 import sys
+import time
 
-# ----------------------------------------------------------
-#
-#               OPENSTACK UTILS
-#
-# -----------------------------------------------------------
+from glanceclient import client as glanceclient
+from keystoneclient.v2_0 import client as keystoneclient
+from neutronclient.v2_0 import client as neutronclient
+from novaclient import client as novaclient
 
 
 # *********************************************
@@ -91,8 +91,35 @@ def source_credentials(rc_file):
 
 
 # *********************************************
+#   CLIENTS
+# *********************************************
+def get_keystone_client():
+    creds_keystone = get_credentials("keystone")
+    return keystoneclient.Client(**creds_keystone)
+
+
+def get_nova_client():
+    creds_nova = get_credentials("nova")
+    return novaclient.Client('2', **creds_nova)
+
+
+def get_neutron_client():
+    creds_neutron = get_credentials("neutron")
+    return neutronclient.Client(**creds_neutron)
+
+
+def get_glance_client():
+    keystone_client = get_keystone_client()
+    glance_endpoint = keystone_client.service_catalog.url_for(
+        service_type='image', endpoint_type='publicURL')
+    return glanceclient.Client(1, glance_endpoint,
+                               token=keystone_client.auth_token)
+
+# *********************************************
 #   NOVA
 # *********************************************
+
+
 def get_instances(nova_client):
     try:
         instances = nova_client.servers.list(search_opts={'all_tenants': 1})
@@ -151,6 +178,19 @@ def get_floating_ips(nova_client):
         return None
 
 
+def get_hypervisors(nova_client):
+    try:
+        nodes = []
+        hypervisors = nova_client.hypervisors.list()
+        for hypervisor in hypervisors:
+            if hypervisor.state == "up":
+                nodes.append(hypervisor.hypervisor_hostname)
+        return nodes
+    except Exception, e:
+        print "Error [get_hypervisors(nova_client)]:", e
+        return None
+
+
 def create_flavor(nova_client, flavor_name, ram, disk, vcpus):
     try:
         flavor = nova_client.flavors.create(flavor_name, ram, vcpus, disk)
@@ -159,6 +199,84 @@ def create_flavor(nova_client, flavor_name, ram, disk, vcpus):
                "'%s')]:" % (flavor_name, ram, disk, vcpus)), e
         return None
     return flavor.id
+
+
+def create_instance(flavor_name,
+                    image_id,
+                    network_id,
+                    instance_name="functest-vm",
+                    confdrive=True,
+                    userdata=None,
+                    av_zone='',
+                    fixed_ip=None,
+                    files=None):
+    nova_client = get_nova_client()
+    try:
+        flavor = nova_client.flavors.find(name=flavor_name)
+    except:
+        print("Error: Flavor '%s' not found. Available flavors are:" %
+              flavor_name)
+        print(nova_client.flavors.list())
+        return -1
+    if fixed_ip is not None:
+        nics = {"net-id": network_id, "v4-fixed-ip": fixed_ip}
+    else:
+        nics = {"net-id": network_id}
+    if userdata is None:
+        instance = nova_client.servers.create(
+            name=instance_name,
+            flavor=flavor,
+            image=image_id,
+            nics=[nics],
+            availability_zone=av_zone,
+            files=files
+        )
+    else:
+        instance = nova_client.servers.create(
+            name=instance_name,
+            flavor=flavor,
+            image=image_id,
+            nics=[nics],
+            config_drive=confdrive,
+            userdata=userdata,
+            availability_zone=av_zone,
+            files=files
+        )
+    return instance
+
+
+def create_instance_and_wait_for_active(flavor_name,
+                                        image_id,
+                                        network_id,
+                                        instance_name="",
+                                        config_drive=False,
+                                        userdata="",
+                                        av_zone='',
+                                        fixed_ip=None,
+                                        files=None):
+    SLEEP = 3
+    VM_BOOT_TIMEOUT = 180
+    nova_client = get_nova_client()
+    instance = create_instance(flavor_name,
+                               image_id,
+                               network_id,
+                               instance_name,
+                               config_drive,
+                               userdata,
+                               av_zone=av_zone,
+                               fixed_ip=fixed_ip,
+                               files=files)
+    count = VM_BOOT_TIMEOUT / SLEEP
+    for n in range(count, -1, -1):
+        status = get_instance_status(nova_client, instance)
+        if status.lower() == "active":
+            return instance
+        elif status.lower() == "error":
+            print("The instance %s went to ERROR status." % instance_name)
+            return None
+        time.sleep(SLEEP)
+    print("Timeout booting the instance %s." % instance_name)
+    return None
 
 
 def create_floating_ip(neutron_client):
@@ -508,9 +626,31 @@ def create_network_full(logger,
     return network_dic
 
 
+def create_bgpvpn(neutron_client, **kwargs):
+    # route_distinguishers
+    # route_targets
+    json_body = {"bgpvpn": kwargs}
+    return neutron_client.create_bgpvpn(json_body)
+
+
+def create_network_association(neutron_client, bgpvpn_id, neutron_network_id):
+    json_body = {"network_association": {"network_id": neutron_network_id}}
+    return neutron_client.create_network_association(bgpvpn_id, json_body)
+
+
+def update_bgpvpn(neutron_client, bgpvpn_id, **kwargs):
+    json_body = {"bgpvpn": kwargs}
+    return neutron_client.update_bgpvpn(bgpvpn_id, json_body)
+
+
+def delete_bgpvpn(neutron_client, bgpvpn_id):
+    return neutron_client.delete_bgpvpn(bgpvpn_id)
+
 # *********************************************
 #   SEC GROUPS
 # *********************************************
+
+
 def get_security_groups(neutron_client):
     try:
         security_groups = neutron_client.list_security_groups()[
@@ -573,6 +713,46 @@ def create_secgroup_rule(neutron_client, sg_id, direction, protocol,
         return False
 
 
+def create_security_group_full(logger, neutron_client,
+                               sg_name, sg_description):
+    sg_id = get_security_group_id(neutron_client, sg_name)
+    if sg_id != '':
+        logger.info("Using existing security group '%s'..." % sg_name)
+    else:
+        logger.info("Creating security group  '%s'..." % sg_name)
+        SECGROUP = create_security_group(neutron_client,
+                                         sg_name,
+                                         sg_description)
+        if not SECGROUP:
+            logger.error("Failed to create the security group...")
+            return False
+
+        sg_id = SECGROUP['id']
+
+        logger.debug("Security group '%s' with ID=%s created successfully."
+                     % (SECGROUP['name'], sg_id))
+
+        logger.debug("Adding ICMP rules in security group '%s'..."
+                     % sg_name)
+        if not create_secgroup_rule(neutron_client, sg_id,
+                                    'ingress', 'icmp'):
+            logger.error("Failed to create the security group rule...")
+            return False
+
+        logger.debug("Adding SSH rules in security group '%s'..."
+                     % sg_name)
+        if not create_secgroup_rule(
+                neutron_client, sg_id, 'ingress', 'tcp', '22', '22'):
+            logger.error("Failed to create the security group rule...")
+            return False
+
+        if not create_secgroup_rule(
+                neutron_client, sg_id, 'egress', 'tcp', '22', '22'):
+            logger.error("Failed to create the security group rule...")
+            return False
+    return sg_id
+
+
 def add_secgroup_to_instance(nova_client, instance_id, secgroup_id):
     try:
         nova_client.servers.add_security_group(instance_id, secgroup_id)
@@ -631,18 +811,28 @@ def get_image_id(glance_client, image_name):
     return id
 
 
-def create_glance_image(glance_client, image_name, file_path, public=True):
+def create_glance_image(glance_client, image_name, file_path, disk="qcow2",
+                        container="bare", public=True, logger=None):
     if not os.path.isfile(file_path):
         print "Error: file " + file_path + " does not exist."
         return False
     try:
-        with open(file_path) as fimage:
-            image = glance_client.images.create(name=image_name,
-                                                is_public=public,
-                                                disk_format="qcow2",
-                                                container_format="bare",
-                                                data=fimage)
-        return image.id
+        image_id = get_image_id(glance_client, image_name)
+        if image_id != '':
+            if logger:
+                logger.info("Image %s already exists." % image_name)
+        else:
+            if logger:
+                logger.info("Creating image '%s' from '%s'..." % (image_name,
+                                                                  file_path))
+            with open(file_path) as fimage:
+                image = glance_client.images.create(name=image_name,
+                                                    is_public=public,
+                                                    disk_format=disk,
+                                                    container_format=container,
+                                                    data=fimage)
+            image_id = image.id
+        return image_id
     except Exception, e:
         print ("Error [create_glance_image(glance_client, '%s', '%s', "
                "'%s')]:" % (image_name, file_path, str(public))), e

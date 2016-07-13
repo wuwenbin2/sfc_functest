@@ -102,7 +102,7 @@ function run_test(){
                 $serial_flag $clean_flag -m full $report
         ;;
         "vims")
-            python ${FUNCTEST_REPO_DIR}/testcases/vIMS/vIMS.py $clean_flag $report
+            python ${FUNCTEST_REPO_DIR}/testcases/vnf/vIMS/vIMS.py $clean_flag $report
         ;;
         "rally_full")
             python ${FUNCTEST_REPO_DIR}/testcases/OpenStack/rally/run_rally-cert.py $clean_flag all $report
@@ -115,19 +115,7 @@ function run_test(){
             python ${FUNCTEST_REPO_DIR}/testcases/features/bgpvpn.py
         ;;
         "onos")
-            if [ "$INSTALLER_TYPE" == "joid" ]; then
-                if [ "$DEPLOY_SCENARIO" == "os-onos-sfc-ha" ]; then
-                    python ${FUNCTEST_REPO_DIR}/testcases/Controllers/ONOS/Teston/onosfunctest.py -i joid -s sfc
-                else
-                    python ${FUNCTEST_REPO_DIR}/testcases/Controllers/ONOS/Teston/onosfunctest.py -i joid
-                fi
-            else
-                if [ "$DEPLOY_SCENARIO" == "os-onos-sfc-ha" ]; then
-                    python ${FUNCTEST_REPO_DIR}/testcases/Controllers/ONOS/Teston/onosfunctest.py -s sfc
-                else
-                    python ${FUNCTEST_REPO_DIR}/testcases/Controllers/ONOS/Teston/onosfunctest.py
-                fi
-            fi
+            python ${FUNCTEST_REPO_DIR}/testcases/Controllers/ONOS/Teston/onosfunctest.py
       ;;
         "promise")
             python ${FUNCTEST_REPO_DIR}/testcases/features/promise.py $report
@@ -145,6 +133,13 @@ function run_test(){
             echo "Sourcing Credentials ${FUNCTEST_CONF_DIR}/stackrc for undercloud .."
             source ${FUNCTEST_CONF_DIR}/stackrc
             python ${FUNCTEST_REPO_DIR}/testcases/security_scan/security_scan.py --config ${FUNCTEST_REPO_DIR}/testcases/security_scan/config.ini
+        ;;
+        "copper")
+            python ${FUNCTEST_REPO_DIR}/testcases/features/copper.py
+        ;;
+        "moon")
+            # TODO put the link to Moon script to be run (if test runnable) here
+            ${repos_dir}/moon/tests/run_tests.sh
         ;;
         *)
             echo "The test case '${test_name}' does not exist."

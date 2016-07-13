@@ -98,16 +98,6 @@ tiers:
                     installer: ''
                     scenario: 'onos'
 
-            -
-                name: ovno
-                criteria: 'status == "PASS"'
-                description: >-
-                    Test Suite for the Open Contrail SDN Controller.
-                    framework.
-                dependencies:
-                    installer: ''
-                    scenario: 'ocl'
-
     -
         name: features
         order: 3
@@ -151,6 +141,23 @@ tiers:
                 dependencies:
                     installer: 'apex'
                     scenario: ''
+
+            -
+                name: copper
+                criteria: 'status == "PASS"'
+                description: >-
+                    Test suite for policy management based on OpenStack Congress
+                dependencies:
+                    installer: 'apex'
+                    scenario: ''
+            -
+                name: moon
+                criteria: 'status == "PASS"'
+                description: >-
+                    Security management system for OPNFV
+                dependencies:
+                    installer: 'compass'
+                    scenario: '(odl)*(moon)'
 
     -
         name: openstack

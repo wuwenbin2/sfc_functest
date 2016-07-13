@@ -40,7 +40,7 @@ def main():
 
     stop_time = time.time()
     duration = round(stop_time - start_time, 1)
-    if ret:
+    if ret == 0:
         logger.info("doctor OK")
         test_status = 'OK'
     else:
@@ -57,9 +57,9 @@ def main():
     version = functest_utils.get_version(logger)
     build_tag = functest_utils.get_build_tag(logger)
 
-    status = "failed"
+    status = "FAIL"
     if details['status'] == "OK":
-        status = "passed"
+        status = "PASS"
 
     logger.info("Pushing Doctor results: TEST_DB_URL=%(db)s pod_name=%(pod)s "
                 "version=%(v)s scenario=%(s)s criteria=%(c)s details=%(d)s" % {
